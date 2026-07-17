@@ -21,6 +21,27 @@ import pandas as pd
 
 @dataclass
 class ImpliedDistribution:
+    """Risk-neutral distribution implied by a ladder of "exceeds strike X" prices.
+
+    Attributes
+    ----------
+    strikes, bin_labels, pmf
+        The strike thresholds, the midpoint of each strike interval, and the
+        probability mass on each interval (``pmf`` sums to 1).
+    mean
+        Histogram expectation ``sum(pmf * bin_labels)``.
+    median
+        The 0.5-quantile, obtained by **linear interpolation of the CDF within
+        the crossing bin** (piecewise-uniform-within-bin assumption) rather than
+        snapping to a bin midpoint. This gives sub-strike resolution and matches
+        how the FEDS Section-3 cdf is meant to be read.
+    mode
+        Midpoint of the single highest-probability bin (``argmax`` of ``pmf``);
+        resolution is inherently the strike spacing.
+    variance, skewness
+        Second and (standardized) third central moments of the binned pmf.
+    """
+
     strikes: np.ndarray
     bin_labels: np.ndarray  # midpoint of each strike interval
     pmf: np.ndarray
@@ -29,6 +50,25 @@ class ImpliedDistribution:
     mode: float
     variance: float
     skewness: float
+
+
+def _interpolated_median(pmf: np.ndarray, edges: np.ndarray, bin_labels: np.ndarray) -> float:
+    """0.5-quantile of a binned distribution by linear interpolation of the CDF.
+
+    Each bin ``[edges[j], edges[j+1])`` carries mass ``pmf[j]`` spread uniformly,
+    so the CDF is piecewise-linear between edges. We find the bin where the CDF
+    reaches 0.5 and interpolate the crossing point inside it, giving a median
+    with finer resolution than the strike spacing. Falls back to the bin
+    midpoint for a zero-mass crossing bin (degenerate ladder).
+    """
+    cum = np.cumsum(pmf)  # cum[j] = P(X <= edges[j+1])
+    j = int(np.searchsorted(cum, 0.5, side="left"))
+    j = min(j, len(pmf) - 1)
+    cdf_before = float(cum[j - 1]) if j > 0 else 0.0
+    if pmf[j] <= 0:
+        return float(bin_labels[j])
+    frac = (0.5 - cdf_before) / pmf[j]
+    return float(edges[j] + frac * (edges[j + 1] - edges[j]))
 
 
 def ladder_to_pdf(strikes: list[float], yes_prices: list[float]) -> ImpliedDistribution:
@@ -72,9 +112,7 @@ def ladder_to_pdf(strikes: list[float], yes_prices: list[float]) -> ImpliedDistr
     std = np.sqrt(variance) if variance > 0 else np.nan
     skewness = float(np.sum(pmf * (bin_labels - mean) ** 3) / std**3) if std and not np.isnan(std) else np.nan
 
-    cdf = np.cumsum(pmf)
-    median_idx = int(np.searchsorted(cdf, 0.5))
-    median = float(bin_labels[min(median_idx, len(bin_labels) - 1)])
+    median = _interpolated_median(pmf, edges, bin_labels)
     mode = float(bin_labels[int(np.argmax(pmf))])
 
     return ImpliedDistribution(

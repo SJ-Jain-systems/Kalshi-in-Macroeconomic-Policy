@@ -1,6 +1,10 @@
-numpy>=1.26
-pandas>=2.1
-matplotlib>=3.8
-scipy>=1.11
-requests>=2.31
-jupyter>=1.0
+# Runtime dependencies. `pyproject.toml` is the source of truth for installs
+# (`pip install -e .` / `pip install -e ".[dev]"`); this file mirrors the
+# runtime set with the same version bounds for anyone who prefers
+# `pip install -r requirements.txt`.
+numpy>=1.26,<3
+pandas>=2.1,<3
+matplotlib>=3.8,<4
+scipy>=1.11,<2
+requests>=2.31,<3
+jupyter>=1.0,<2

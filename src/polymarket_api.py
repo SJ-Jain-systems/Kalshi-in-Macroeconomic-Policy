@@ -39,13 +39,36 @@ import time
 
 import pandas as pd
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 GAMMA_URL = "https://gamma-api.polymarket.com"
 CLOB_URL = "https://clob.polymarket.com"
+TIMEOUT_S = 30
+
+
+def _build_session() -> requests.Session:
+    """Shared session with retry/backoff (429/5xx), mirroring ``kalshi_api``."""
+    session = requests.Session()
+    retry = Retry(
+        total=5,
+        backoff_factor=0.5,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset(["GET"]),
+        respect_retry_after_header=True,
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
+
+_SESSION = _build_session()
 
 
 def _get(base: str, path: str, params: dict | None = None) -> dict | list:
-    resp = requests.get(f"{base}{path}", params=params, timeout=30)
+    resp = _SESSION.get(f"{base}{path}", params=params, timeout=TIMEOUT_S)
     resp.raise_for_status()
     return resp.json()
 

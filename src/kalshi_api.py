@@ -22,12 +22,41 @@ import time
 
 import pandas as pd
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 BASE_URL = "https://api.kalshi.com/trade-api/v2"
+TIMEOUT_S = 30
+
+
+def _build_session() -> requests.Session:
+    """A shared session with retry/backoff for the token-bucket rate limiter.
+
+    Kalshi moved to token-bucket rate limiting (effective April 2026), so a 429
+    is a normal, retryable signal rather than a hard failure. ``Retry`` honors
+    the ``Retry-After`` header and backs off exponentially on 429/5xx; other
+    errors still raise via ``raise_for_status``.
+    """
+    session = requests.Session()
+    retry = Retry(
+        total=5,
+        backoff_factor=0.5,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset(["GET"]),
+        respect_retry_after_header=True,
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
+
+_SESSION = _build_session()
 
 
 def _get(path: str, params: dict | None = None) -> dict:
-    resp = requests.get(f"{BASE_URL}{path}", params=params, timeout=30)
+    resp = _SESSION.get(f"{BASE_URL}{path}", params=params, timeout=TIMEOUT_S)
     resp.raise_for_status()
     return resp.json()
 
